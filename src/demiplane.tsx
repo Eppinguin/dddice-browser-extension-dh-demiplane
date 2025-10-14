@@ -20,6 +20,7 @@ let dddice: ThreeDDice;
 let canvasElement: HTMLCanvasElement;
 let user: IUser;
 let isInitialized = false;
+let isInitializing = false;
 let watchingStorage = false;
 let initializationAttempts = 0;
 const MAX_INITIALIZATION_ATTEMPTS = 3;
@@ -901,6 +902,8 @@ async function sendRollRequest(
       log.warn('Network error detected, attempting to reconnect');
       handleConnectionLost();
     }
+  } finally {
+    isInitializing = false;
   }
 }
 
@@ -908,6 +911,12 @@ async function sendRollRequest(
  * Initialize the dddice SDK
  */
 async function initializeSDK(): Promise<void> {
+  if (isInitializing) {
+    log.debug('Initialization already in progress, skipping');
+    return;
+  }
+  isInitializing = true;
+
   try {
     // Reset initialization attempts if this is a fresh initialization
     if (!dddice) {
@@ -1002,10 +1011,9 @@ async function initializeSDK(): Promise<void> {
     // Preload themes based on game system
     await preloadAllThemes(theme, hopeTheme, fearTheme, plotDieTheme);
 
-    // Mark as initialized and store state
+    // Mark as initialized
     isInitialized = true;
     initializationAttempts = 0; // Reset counter on successful initialization
-    setStorage({ demiplane_initialized: true });
 
     // Set up connection monitoring using the API's built-in events
     setupConnectionMonitoring();
@@ -1217,57 +1225,16 @@ async function updateParticipantName() {
 /**
  * Initialize the extension
  */
-async function init() {
-  try {
-    // Detect game system and character UUID
-    const { system, uuid } = detectGameSystem();
-    currentGameSystem = system;
+function init() {
+  const { system, uuid } = detectGameSystem();
+  currentGameSystem = system;
 
-    // Handle case when not on a character sheet page
-    if (!uuid) {
-      log.debug('Not on a character sheet page, cleaning up resources');
-      cleanup();
-      return;
-    }
-
-    log.debug(`Initializing on ${system} character sheet page with UUID: ${uuid}`);
-
-    // Check if we need to initialize the SDK
-    if (!isInitialized || !dddice?.api) {
-      const initialized = await getStorage('demiplane_initialized');
-      const apiKey = await getStorage('apiKey');
-
-      log.debug('Checking initialization state:', {
-        initialized,
-        apiKeyExists: !!apiKey,
-        isInitialized,
-        hasDddiceApi: !!dddice?.api,
-      });
-
-      if (apiKey) {
-        log.debug('API key found, initializing SDK');
-        await initializeSDK();
-      } else {
-        log.debug('No API key found, skipping initialization');
-      }
-    } else {
-      log.debug('Already initialized, updating state if needed');
-
-      // Ensure localStorage watching is active
-      if (!watchingStorage) {
-        log.debug('Starting localStorage watch for dice rolls');
-        await watchLocalStorage();
-      }
-
-      // Resize canvas if needed
-      if (dddice?.canvas) {
-        log.debug('Resizing canvas to match window dimensions');
-        dddice.resize(window.innerWidth, window.innerHeight);
-      }
-    }
-  } catch (e) {
-    log.error('Error during initialization:', e);
-    notify('Error initializing dddice. Please refresh the page.');
+  if (uuid) {
+    log.debug(`On ${system} character sheet with UUID: ${uuid}`);
+    updateState();
+  } else {
+    log.debug('Not on a character sheet page, cleaning up resources');
+    cleanup();
   }
 }
 
@@ -1341,6 +1308,17 @@ chrome.runtime.onMessage.addListener(function (message) {
   }
 });
 
+// Listen for storage changes to update the state
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    const relevantChanges = ['apiKey', 'room', 'theme', 'hopeTheme', 'fearTheme', 'plotDieTheme'];
+    if (relevantChanges.some(key => key in changes)) {
+      log.debug('Relevant storage change detected, updating state', changes);
+      updateState();
+    }
+  }
+});
+
 // Initialize on page load
 window.addEventListener('load', () => {
   log.debug('Page loaded, initializing');
@@ -1354,6 +1332,24 @@ window.addEventListener('resize', () => {
     dddice.resize(window.innerWidth, window.innerHeight);
   }
 });
+
+/**
+ * Update state from storage and initialize the SDK if conditions are met
+ */
+async function updateState() {
+  const apiKey = await getStorage('apiKey');
+  log.debug('Updating state from storage', {
+    apiKeyExists: !!apiKey,
+    isInitialized,
+    isInitializing,
+  });
+
+  if (apiKey && !isInitialized && !isInitializing) {
+    await initializeSDK();
+  } else if (!apiKey && isInitialized) {
+    cleanup();
+  }
+}
 
 // Initialize on script load
 log.debug('Script loaded, starting initialization');
