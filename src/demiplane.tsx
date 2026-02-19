@@ -25,6 +25,22 @@ let watchingStorage = false;
 let initializationAttempts = 0;
 const MAX_INITIALIZATION_ATTEMPTS = 3;
 let reconnectionTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressConnectionEventsUntil = 0;
+let lastConnectionEventAt = 0;
+let reconnectInProgress = false;
+
+const RECONNECT_DELAY_MS = 2000;
+const CONNECTION_EVENT_DEDUPE_MS = 1500;
+
+function isTopLevelFrame(): boolean {
+  try {
+    return window.top === window.self;
+  } catch {
+    return false;
+  }
+}
+
+const shouldRunInFrame = isTopLevelFrame();
 
 enum GameSystem {
   AVATARLEGENDS = 'avatarlegends',
@@ -902,8 +918,6 @@ async function sendRollRequest(
       log.warn('Network error detected, attempting to reconnect');
       handleConnectionLost();
     }
-  } finally {
-    isInitializing = false;
   }
 }
 
@@ -911,6 +925,10 @@ async function sendRollRequest(
  * Initialize the dddice SDK
  */
 async function initializeSDK(): Promise<void> {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   if (isInitializing) {
     log.debug('Initialization already in progress, skipping');
     return;
@@ -952,6 +970,7 @@ async function initializeSDK(): Promise<void> {
     // Clean up existing instance if present
     if (dddice) {
       log.debug('Cleaning up existing dddice instance');
+      suppressConnectionEventsUntil = Date.now() + RECONNECT_DELAY_MS + 1500;
       if (canvasElement) {
         canvasElement.remove();
       }
@@ -1042,6 +1061,8 @@ async function initializeSDK(): Promise<void> {
       log.error(`Failed to initialize after ${MAX_INITIALIZATION_ATTEMPTS} attempts`);
       notify('Failed to initialize dddice after multiple attempts. Please refresh the page.');
     }
+  } finally {
+    isInitializing = false;
   }
 }
 
@@ -1049,14 +1070,32 @@ async function initializeSDK(): Promise<void> {
  * Handle connection loss events
  */
 function handleConnectionLost() {
+  const now = Date.now();
+
+  if (now < suppressConnectionEventsUntil) {
+    log.debug('Ignoring connection lost event during intentional reconnect window');
+    return;
+  }
+
+  if (now - lastConnectionEventAt < CONNECTION_EVENT_DEDUPE_MS) {
+    log.debug('Ignoring duplicate connection lost event');
+    return;
+  }
+
+  lastConnectionEventAt = now;
+
   log.warn('dddice connection lost, attempting to reconnect');
-  notify('dddice connection lost, attempting to reconnect...');
 
   // Attempt to reconnect after a short delay
-  if (!reconnectionTimer) {
+  if (!reconnectionTimer && !reconnectInProgress) {
     reconnectionTimer = setTimeout(() => {
-      initializeSDK();
-    }, 2000);
+      reconnectionTimer = null;
+      reconnectInProgress = true;
+      isInitialized = false;
+      initializeSDK().finally(() => {
+        reconnectInProgress = false;
+      });
+    }, RECONNECT_DELAY_MS);
   }
 }
 
@@ -1226,6 +1265,10 @@ async function updateParticipantName() {
  * Initialize the extension
  */
 function init() {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   const { system, uuid } = detectGameSystem();
   currentGameSystem = system;
 
@@ -1267,6 +1310,7 @@ function cleanup() {
   isInitialized = false;
   watchingStorage = false;
   initializationAttempts = 0;
+  reconnectInProgress = false;
 
   log.debug('Resources cleaned up');
 }
@@ -1284,6 +1328,10 @@ document.addEventListener('click', () => {
 
 // Handle extension messages
 chrome.runtime.onMessage.addListener(function (message) {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   log.debug('Received message:', message.type);
 
   switch (message.type) {
@@ -1310,6 +1358,10 @@ chrome.runtime.onMessage.addListener(function (message) {
 
 // Listen for storage changes to update the state
 chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   if (namespace === 'local') {
     const relevantChanges = ['apiKey', 'room', 'theme', 'hopeTheme', 'fearTheme', 'plotDieTheme'];
     if (relevantChanges.some(key => key in changes)) {
@@ -1321,6 +1373,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // Initialize on page load
 window.addEventListener('load', () => {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   log.debug('Page loaded, initializing');
   init();
 });
@@ -1337,6 +1393,10 @@ window.addEventListener('resize', () => {
  * Update state from storage and initialize the SDK if conditions are met
  */
 async function updateState() {
+  if (!shouldRunInFrame) {
+    return;
+  }
+
   const apiKey = await getStorage('apiKey');
   log.debug('Updating state from storage', {
     apiKeyExists: !!apiKey,
@@ -1352,19 +1412,23 @@ async function updateState() {
 }
 
 // Initialize on script load
-log.debug('Script loaded, starting initialization');
-init();
+if (shouldRunInFrame) {
+  log.debug('Script loaded, starting initialization');
+  init();
+}
 
 // Watch for URL changes to reinitialize when navigating
-let lastUrl = window.location.href;
-new MutationObserver(() => {
-  const currentUrl = window.location.href;
-  if (currentUrl !== lastUrl) {
-    lastUrl = currentUrl;
-    log.debug('URL changed, reinitializing extension');
-    // Reset state before reinitializing
-    isInitialized = false;
-    watchingStorage = false;
-    init();
-  }
-}).observe(document, { subtree: true, childList: true });
+if (shouldRunInFrame) {
+  let lastUrl = window.location.href;
+  new MutationObserver(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      log.debug('URL changed, reinitializing extension');
+      // Reset state before reinitializing
+      isInitialized = false;
+      watchingStorage = false;
+      init();
+    }
+  }).observe(document, { subtree: true, childList: true });
+}

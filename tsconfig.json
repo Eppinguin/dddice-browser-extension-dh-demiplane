@@ -8,6 +8,7 @@
     "allowJs": false,
     "allowSyntheticDefaultImports": true,
     "declaration": true,
+    "rootDir": "./src",
     "declarationDir": "public/js/types",
     "experimentalDecorators": true,
     "jsx": "react",

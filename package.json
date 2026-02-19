@@ -1,9 +1,9 @@
 {
-  "name": "dddice-browser-extension",
-  "version": "0.9.0",
+  "name": "dddice-demiplane-extension",
+  "version": "0.9.0.2",
   "description": "Roll 3D digital dice using your favorite browser-based VTT.",
-  "repository": "git@github.com:dddice/dddice-browser-extension.git",
-  "author": "dddice <developers@dddice.com>",
+  "repository": "git@github.com:Eppinguin/dddice-demiplane-extension.git",
+  "author": "Eppinguin",
   "scripts": {
     "build:manifest_v3": "parcel build src/manifest_v3/manifest.json --dist-dir manifest_v3 --no-cache --no-source-maps",
     "build:manifest_v2": "parcel build src/manifest_v2/manifest.json --dist-dir manifest_v2 --no-cache --no-source-maps",
@@ -28,6 +28,9 @@
     "@dice-roller/rpg-dice-roller": "^5.2.1",
     "@parcel/bundler-experimental": "^2.7.0",
     "@parcel/config-webextension": "^2.7.0",
+    "@parcel/core": "^2.16.0",
+    "@parcel/transformer-js": "^2.16.0",
+    "@parcel/transformer-react-refresh-wrap": "^2.16.0",
     "@parcel/transformer-svg-react": "^2.7.0",
     "@parcel/validator-typescript": "^2.7.0",
     "@types/chrome": "^0.0.299",
@@ -40,7 +43,7 @@
     "buffer": "^6.0.3",
     "classnames": "^2.3.1",
     "crypto-browserify": "^3.12.0",
-    "dddice-js": "^0.19",
+    "dddice-js": "^0.19.27",
     "eslint-config-prettier": "^8.5.0",
     "events": "^3.3.0",
     "husky": "^7.0.4",
@@ -64,6 +67,7 @@
     "react-i18next": "^15.4.0",
     "react-tooltip": "^4.5.0",
     "stream-browserify": "^3.0.0",
+    "svgo": "^3.3.2",
     "tailwindcss": "^3.1.8",
     "web-ext": "^8.9.0"
   },
@@ -83,6 +87,7 @@
     ]
   },
   "dependencies": {
+    "debug": "^4.3.4",
     "webextension-polyfill": "^0.12.0"
   }
 }
